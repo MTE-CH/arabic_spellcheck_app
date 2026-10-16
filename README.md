@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Arabic (MSA) Wrong-Word Detector
 
 Flags wrong words in Arabic text in two steps. It never rewrites or suggests anything.
@@ -50,3 +51,6 @@ measure how many real errors are caught. Measure that separately on text with kn
 - Arabic text extracted from PDFs can be garbled. Prefer .docx or .txt, especially for calibration.
 - Calibration text must be correct MSA from the same field as the text you will check.
 - On a hosted service the disk can reset on restart, so commit `profiles/` and `custom_words.txt`.
+=======
+# arabic_spellcheck_app
+>>>>>>> 84e792cb2094f0d99bed7b93abc15650237e981b
