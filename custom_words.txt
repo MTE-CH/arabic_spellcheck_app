@@ -1,0 +1,3 @@
+# Words that are correct but missing from the dictionary (names, places, terms). One per line.
+# Lines starting with # are ignored. Prefixes (و ف ب ل ك ال) are handled automatically.
+بوتفليقة

@@ -1,0 +1,8 @@
+{
+  "label": "General MSA (uncalibrated default)",
+  "threshold": -12.0,
+  "calibrated": false,
+  "percentile": null,
+  "n_words": 0,
+  "note": "Starting guess, not measured. A random guess over the vocabulary scores about -10.3, so -12 flags only words the model finds less likely than a random pick. Calibrate on texts from your domain and save a profile."
+}
