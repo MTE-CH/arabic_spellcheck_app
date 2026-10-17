@@ -7,13 +7,17 @@ Flow
   - Pick a domain profile (predefined threshold) and just check text, or
   - upload books from your domain, calibrate a threshold on them, use it and/or save it as a profile.
 """
+import hmac
 import html
+import os
+import uuid
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 import core
+import feedback
 
 st.set_page_config(page_title="Arabic Wrong-Word Detector", page_icon="📝", layout="wide")
 
@@ -67,6 +71,88 @@ def render_highlighted(text: str, flags) -> str:
         pos = f.end
     parts.append(html.escape(text[pos:]))
     return f'<div class="rtl-box">{"".join(parts)}</div>'
+
+
+# ------------------------------------------------------------------ beta feedback
+st.session_state.setdefault("session_id", uuid.uuid4().hex)   # random, not tied to a person
+
+VERDICTS = {"—": None, "Real error": "error", "Not an error": "not_error"}
+NO_DOMAIN = "(no specific domain)"
+OTHER_DOMAIN = "Other (type a name below)"
+MAX_REVIEW = 200
+
+
+def render_feedback_form(text_r, flags, thr_used, active_profile, profiles):
+    """Let a beta user rate the flags. Answers are stored in a separate corpus per domain."""
+    with st.expander("Help improve the tool (beta feedback)"):
+        st.caption(
+            "Tell us which flags were right. Your answers are collected, per domain, "
+            "to train better models in the future."
+        )
+        rid = st.session_state.get("result_id", "0")
+        domain_keys = [k for k in profiles if k != "general"]
+        options = [NO_DOMAIN] + domain_keys + [OTHER_DOMAIN]
+        default = active_profile if active_profile in domain_keys else NO_DOMAIN
+
+        with st.form(f"feedback_form_{rid}"):
+            shown = flags[:MAX_REVIEW]
+            if len(flags) > MAX_REVIEW:
+                st.caption(f"Showing the first {MAX_REVIEW} of {len(flags)} flagged words.")
+            widgets = {}
+            for i, f in enumerate(shown):
+                c1, c2, c3 = st.columns([2, 2, 4])
+                c1.markdown(f"**{f.word}**")
+                c2.caption("context" if f.reason == "context" else "dictionary")
+                widgets[i] = c3.radio(
+                    f"Verdict for {f.word} ({i})", list(VERDICTS), horizontal=True,
+                    label_visibility="collapsed", key=f"fb_{rid}_{i}",
+                )
+            missed = st.multiselect(
+                "Real errors the app did NOT flag (optional)", list(feedback.candidate_missed(text_r, flags)),
+                key=f"fb_missed_{rid}",
+            )
+            domain_choice = st.selectbox(
+                "Domain of this text", options, index=options.index(default),
+                format_func=lambda k: profiles[k]["label"] if k in profiles else k,
+                key=f"fb_domain_{rid}_{default}",
+            )
+            other = st.text_input("Domain name (only if you chose 'Other')", key=f"fb_other_{rid}")
+            consent = st.checkbox(
+                "I agree that the sentence containing each word I rate is stored to improve the tool. "
+                "No name, account or IP address is stored.",
+                key=f"fb_consent_{rid}",
+            )
+            submitted = st.form_submit_button("Send feedback")
+
+        if submitted:
+            if not consent:
+                st.warning("Please tick the consent box to send feedback.")
+                return
+            if domain_choice == NO_DOMAIN:
+                domain = None
+            elif domain_choice == OTHER_DOMAIN:
+                domain = other.strip() or None
+                if domain is None:
+                    st.warning("Type a domain name, or choose 'no specific domain'.")
+                    return
+            else:
+                domain = domain_choice
+            verdicts = {i: VERDICTS[v] for i, v in widgets.items() if VERDICTS[v]}
+            records = feedback.build_records(
+                text_r, flags, verdicts, missed, domain, thr_used,
+                None if active_profile == "__mine__" else active_profile,
+                st.session_state["session_id"],
+            )
+            if not records:
+                st.info("Nothing to send yet: pick a verdict for at least one word, or add a missed word.")
+                return
+            saved = feedback.save_records(records)
+            slug_ = feedback.slug(domain)
+            where = f"the '{slug_}' corpus" if slug_ else "the general corpus"
+            msg = f"Thank you. {saved} new item(s) saved to {where}."
+            if saved < len(records):
+                msg += f" {len(records) - saved} were already saved."
+            st.success(msg)
 
 
 # ------------------------------------------------------------------ sidebar
@@ -160,6 +246,7 @@ with tab_check:
             bar = progress_bar("Checking...")
             flags, n_words = core.analyze(text, scorer, checker, threshold, progress=bar)
             st.session_state.last_result = (text, flags, n_words, threshold)
+            st.session_state.result_id = uuid.uuid4().hex
 
     res = st.session_state.get("last_result")
     if res:
@@ -192,6 +279,7 @@ with tab_check:
             st.download_button("Download flagged words (CSV)", df.to_csv(index=False).encode("utf-8-sig"), "flagged_words.csv", "text/csv")
         else:
             st.success("No suspicious words.")
+        render_feedback_form(text_r, flags, thr_used, choice, profiles)
 
 # ------------------------------------------------------------------ tab: calibrate
 with tab_cal:
@@ -304,5 +392,23 @@ It does not measure how many errors will be caught.
 - Names and new terms missing from the dictionary are flagged until you add them to the custom list.
 - Calibration text should be correct MSA from the same field as the text you will check.
 - Scores from the context step are probabilities spread over about 30,000 word pieces, so they are small numbers.
+
+**Beta feedback.** After a check, you can say which flags were right and which words were missed. With your
+consent, each answer is saved with its sentence to a corpus for the text's domain (or a general corpus), to
+train better models later.
         """
     )
+
+    admin_key = os.environ.get("FEEDBACK_ADMIN_KEY")
+    if admin_key:   # only shown when the developer has set this environment variable
+        with st.expander("Developer: feedback corpora"):
+            entered = st.text_input("Admin key", type="password")
+            if entered and hmac.compare_digest(entered.encode(), admin_key.encode()):
+                summ = feedback.summary()
+                if summ:
+                    st.dataframe(pd.DataFrame(summ).T)
+                else:
+                    st.caption("No feedback yet.")
+                st.download_button("Download all corpora (zip)", feedback.export_zip(), "feedback_corpora.zip", "application/zip")
+            elif entered:
+                st.error("Wrong key.")

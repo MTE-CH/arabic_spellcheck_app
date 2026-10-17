@@ -37,6 +37,21 @@ Build a profile without opening the app:
 python build_presets.py --key law --label "Law" --input books/law --max-sentences 3000
 ```
 
+## Beta feedback (corpus for future training)
+
+After a check, the "Help improve the tool" box lets a beta user mark each flagged word as **Real error** or
+**Not an error**, and list real errors the app **missed**. With the user's consent, each answer is saved with
+its sentence, the app's reason/score/threshold, and a random session id (no name, account or IP).
+
+- Feedback is stored **per domain**: `feedback/domain_<name>.jsonl`. Text with no specific domain goes to
+  `feedback/general.jsonl`. The domain defaults to the selected profile and can be changed or typed in.
+- One JSON object per line. If a user changes their mind about a word, the latest answer wins when the corpus is read
+  (`feedback.load_examples(domain)`); `feedback.summary()` gives counts per domain.
+- The folder holds sentences from users' documents, so it is git-ignored. On a hosted service back it up.
+- To download everything, set the environment variable `FEEDBACK_ADMIN_KEY` before starting the app. The About
+  tab then shows a developer section (counts and a zip download) behind that key.
+- Writes are safe for several sessions in one process. Several server processes would need a database instead.
+
 ## What the threshold means
 
 The score is a log-probability: -9 is about 0.012%, -12 about 0.0006%. A word is flagged when its score
